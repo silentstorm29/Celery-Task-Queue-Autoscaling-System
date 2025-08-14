@@ -20,7 +20,6 @@ jobs:
     permissions: { contents: read, packages: read }
     steps:
       # (use ghcr.io/silentstorm29/...:${GITHUB_SHA::12} in kustomize set image)
-      - name: Checkout code
       - uses: actions/checkout@v4
 
       - name: Install kubectl
