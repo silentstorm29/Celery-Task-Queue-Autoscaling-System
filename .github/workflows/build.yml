@@ -2,7 +2,7 @@ name: Build & Push Images
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
   pull_request:
   workflow_dispatch:
 
@@ -16,6 +16,7 @@ jobs:
       contents: read
       packages: write
     strategy:
+      fail-fast: false
       matrix:
         include:
           - name: app
@@ -28,7 +29,8 @@ jobs:
             image_name: celery-queue-exporter
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -43,29 +45,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Derive tags
-        id: tags
-        run: |
-          echo "sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
-            echo "is_main=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_main=false" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Docker metadata (tags & labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image_name }}
+          tags: |
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
 
-      # Always push the short-SHA tag
-      - name: Build & Push ${{ matrix.name }} (sha)
+      - name: Build & Push ${{ matrix.name }}
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: true
           provenance: false
-          tags: |
-            ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image_name }}:${{ steps.tags.outputs.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      # On main, also push :latest
-      - name: Tag latest for ${{ matrix.name }}
-        if: steps.tags.outputs.is_main == 'true'
