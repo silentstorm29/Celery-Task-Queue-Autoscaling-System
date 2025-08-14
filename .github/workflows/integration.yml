@@ -12,12 +12,15 @@ env:
   NS: celery-autoscale
 
 jobs:
+  build-and-push:
+    # (your existing job from build.yml—move it here or keep as composite)
   integration:
+    needs: build-and-push
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: read
+    permissions: { contents: read, packages: read }
     steps:
+      # (use ghcr.io/silentstorm29/...:${GITHUB_SHA::12} in kustomize set image)
+      - name: Checkout code
       - uses: actions/checkout@v4
 
       - name: Install kubectl
