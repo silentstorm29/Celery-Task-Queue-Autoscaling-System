@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: celery-autoscale
+
+resources:
+  - 00-namespace.yaml
+  - 01-redis.yaml
+  - 02-worker.yaml
+  - 03-queue-exporter.yaml
+  - 04-prometheus.yaml
+  - 05-prometheus-adapter.yaml
+  - 06-hpa.yaml
+  - 07-rbac.yaml
+
+images:
+  - name: celery-autoscale-app
+    newName: ghcr.io/silentstorm29/Celery-Task-Queue-Autoscaling-System/celery-autoscale-app
+    newTag: dev
+  - name: celery-queue-exporter
+    newName: ghcr.io/silentstorm29/Celery-Task-Queue-Autoscaling-System/celery-queue-exporter
+    newTag: dev
