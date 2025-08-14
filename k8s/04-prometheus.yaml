@@ -1,63 +1,11 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: prometheus-config
-  namespace: celery-autoscale
-data:
-  prometheus.yml: |
-    global:
-      scrape_interval: 5s
-    scrape_configs:
-    - job_name: 'kubernetes-pods'
-      kubernetes_sd_configs: [{role: pod}]
-      relabel_configs:
-      - action: labelmap
-        regex: __meta_kubernetes_pod_label_(.+)
-      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
-        action: keep
-        regex: "true"
-      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
-        action: replace
-        target_label: __meta_kubernetes_pod_container_port_number
-    - job_name: 'queue-exporter'
-      kubernetes_sd_configs: [{role: endpoints}]
-      relabel_configs:
-      - action: keep
-        source_labels: [__meta_kubernetes_service_name]
-        regex: queue-exporter
-      metrics_path: /metrics
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: prometheus
-  namespace: celery-autoscale
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: prometheus } }
-  template:
-    metadata: { labels: { app: prometheus } }
-    spec:
-      serviceAccountName: prometheus
-      containers:
-      - name: prometheus
-        image: prom/prometheus:v2.53.0
-        args: ["--config.file=/etc/prometheus/prometheus.yml"]
-        ports: [{ containerPort: 9090 }]
-        volumeMounts: [{ name: config, mountPath: /etc/prometheus }]
-      volumes: [{ name: config, configMap: { name: prometheus-config } }]
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: prometheus
-  namespace: celery-autoscale
-spec:
-  selector: { app: prometheus }
-  ports: [{ name: http, port: 9090, targetPort: 9090 }]
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: prometheus
-  namespace: celery-autoscale
+- job_name: 'workers'
+  kubernetes_sd_configs:
+  - role: pod
+  relabel_configs:
+  - action: keep
+    source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+    regex: "true"
+  - source_labels: [__meta_kubernetes_pod_ip, __meta_kubernetes_pod_annotation_prometheus_io_port]
+    separator: ':'
+    target_label: __address__
+    replacement: $1:$2

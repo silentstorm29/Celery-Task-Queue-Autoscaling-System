@@ -11,6 +11,7 @@ resources:
   - 05-prometheus-adapter.yaml
   - 06-hpa.yaml
   - 07-rbac.yaml
+  - 08-external-metrics-apiservice.yaml
 
 images:
   - name: celery-autoscale-app

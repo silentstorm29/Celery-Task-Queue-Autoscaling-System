@@ -29,6 +29,13 @@ spec:
         resources:
           requests: { cpu: "100m", memory: "128Mi" }
           limits: { cpu: "500m", memory: "512Mi" }
+        readinessProbe:
+          exec:
+            command: ["bash", "-lc", "pgrep -f 'celery.*worker' >/dev/null"]
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 6
+
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -36,3 +43,4 @@ spec:
             podAffinityTerm:
               topologyKey: "kubernetes.io/hostname"
               labelSelector: { matchLabels: { app: celery-worker } }
+        

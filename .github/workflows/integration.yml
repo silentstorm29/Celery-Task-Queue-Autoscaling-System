@@ -1,40 +1,40 @@
-name: Integration (KinD autoscaling)
+name: CI (build -> KinD deploy -> autoscaling test)
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
+  workflow_dispatch:
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_APP: ${{ github.repository }}/celery-autoscale-app
-  IMAGE_EXPORTER: ${{ github.repository }}/celery-queue-exporter
   NS: celery-autoscale
 
 jobs:
-  build-and-push:
-    # (your existing job from build.yml—move it here or keep as composite)
-  integration:
-    needs: build-and-push
+  e2e:
     runs-on: ubuntu-latest
-    permissions: { contents: read, packages: read }
+    permissions:
+      contents: read
     steps:
-      # (use ghcr.io/silentstorm29/...:${GITHUB_SHA::12} in kustomize set image)
       - uses: actions/checkout@v4
 
-      - name: Install kubectl
-        uses: azure/setup-kubectl@v4
-        with:
-          version: 'v1.30.0'
-      - name: Install kustomize
-        uses: imranismail/setup-kustomize@v2
-        with:
-          kustomize-version: '5.4.1'
-      - name: Spin up KinD
-        uses: helm/kind-action@v1
-        with:
-          version: v0.24.0
-          cluster_name: ci-kind
+      - uses: docker/setup-buildx-action@v3
+      - name: Build images (local tags)
+        run: |
+          docker build -t celery-autoscale-app:ci -f app/Dockerfile .
+          docker build -t celery-queue-exporter:ci -f exporter/Dockerfile .
+
+      - uses: helm/kind-action@v1
+        with: { version: v0.24.0, cluster_name: ci-kind }
+
+      - name: Load images into KinD
+        run: |
+          kind load docker-image celery-autoscale-app:ci --name ci-kind
+        # if exporter is used by HPA path, also:
+          kind load docker-image celery-queue-exporter:ci --name ci-kind
+
+      - uses: azure/setup-kubectl@v4
+        with: { version: 'v1.30.0' }
+      - uses: imranismail/setup-kustomize@v2
+        with: { kustomize-version: '5.4.1' }
 
       - name: Enable metrics-server
         run: |
@@ -43,18 +43,12 @@ jobs:
             -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
           kubectl -n kube-system rollout status deploy/metrics-server --timeout=180s
 
-      - name: Use short-SHA tags from last build
-        id: tags
-        run: |
-          echo "app=${{ env.REGISTRY }}/${{ env.IMAGE_APP }}:${GITHUB_SHA::12}" >> $GITHUB_OUTPUT
-          echo "exporter=${{ env.REGISTRY }}/${{ env.IMAGE_EXPORTER }}:${GITHUB_SHA::12}" >> $GITHUB_OUTPUT
-
-      - name: Prepare kustomize overrides
+      - name: Prepare kustomize (use local :ci tags)
         working-directory: k8s
         run: |
           kustomize edit set namespace ${NS} || true
-          kustomize edit set image celery-autoscale-app=${{ steps.tags.outputs.app }} || true
-          kustomize edit set image celery-queue-exporter=${{ steps.tags.outputs.exporter }} || true
+          kustomize edit set image celery-autoscale-app=celery-autoscale-app:ci || true
+          kustomize edit set image celery-queue-exporter=celery-queue-exporter:ci || true
 
       - name: Deploy stack
         run: |
@@ -67,11 +61,9 @@ jobs:
           kubectl -n ${NS} rollout status deploy/prometheus-adapter --timeout=240s
           kubectl -n ${NS} get pods,deploy,svc,hpa -o wide
 
-      - name: Install Python for load
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install deps
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - name: Install generator deps
         run: pip install celery redis
 
       - name: Port-forward Redis and send burst
@@ -100,3 +92,15 @@ jobs:
           kubectl -n ${NS} logs deploy/prometheus-adapter || true
           kubectl -n ${NS} logs deploy/queue-exporter || true
           exit 1
+
+      - name: Debug on failure (pods, events, logs)
+        if: failure()
+        run: |
+          kubectl -n ${NS} get pods -o wide
+          kubectl -n ${NS} describe deploy celery-worker || true
+          for p in $(kubectl -n ${NS} get pods -l app=celery-worker -o name); do
+            echo "== LOGS for $p =="
+            kubectl -n ${NS} logs $p --all-containers=true --tail=200 || true
+          done
+          kubectl -n ${NS} get events --sort-by=.lastTimestamp | tail -n 200 || true
+
