@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker
+  namespace: celery-autoscale
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: celery-worker } }
+  template:
+    metadata:
+      labels: { app: celery-worker }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+    spec:
+      containers:
+      - name: worker
+        image: celery-autoscale-app
+        imagePullPolicy: Always
+        env:
+        - { name: BROKER_URL, value: redis://redis:6379/0 }
+        - { name: BACKEND_URL, value: redis://redis:6379/1 }
+        - { name: METRICS_PORT, value: "9100" }
+        command: ["bash", "-lc"]
+        args:
+          - >
+            python /app/worker.py &
+            celery -A celery_app worker --loglevel=INFO --concurrency=2
+        resources:
+          requests: { cpu: "100m", memory: "128Mi" }
+          limits: { cpu: "500m", memory: "512Mi" }
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 50
+            podAffinityTerm:
+              topologyKey: "kubernetes.io/hostname"
+              labelSelector: { matchLabels: { app: celery-worker } }
